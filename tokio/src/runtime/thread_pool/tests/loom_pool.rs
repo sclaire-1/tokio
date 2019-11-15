@@ -132,6 +132,48 @@ fn pool_multi_notify() {
 }
 
 #[test]
+fn repro_1768() {
+    const BLOCK_ON_PER_RT: usize = 3000;
+    // Changing this to a higher value will prevent it from getting stuck
+    const NR_ITERATIONS: usize = 5;
+
+    async fn do_iteration(pool: &Runtime) {
+        use crate::sync::{self, oneshot};
+        let m = Arc::new(sync::Mutex::new(()));
+        let (sender, receiver) = oneshot::channel();
+
+        let m = m.clone();
+        pool.spawn(async move {
+            for i in 0..NR_ITERATIONS {
+                println!("lock iter {}", i);
+                let _ = m.lock().await;
+            }
+            sender.send(());
+        });
+
+        receiver.await;
+    }
+
+    let iter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(1));
+    loom::model(move || {
+        let iter = iter.fetch_add(1, Relaxed);
+
+        println!("rt({}): starting", iter);
+        let rt = mk_pool(1);
+
+        // for i in 0..BLOCK_ON_PER_RT {
+        //     println!("rt({}): starting block_on {}", iter, i);
+        rt.block_on(async {
+            do_iteration(&rt).await;
+        });
+        //     println!("rt({}): finishing block_on {}", iter, i);
+        // }
+
+        println!("rt({}): stopping", iter);
+    });
+}
+
+#[test]
 fn pool_shutdown() {
     loom::model(|| {
         let pool = mk_pool(2);

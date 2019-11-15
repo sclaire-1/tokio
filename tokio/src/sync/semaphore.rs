@@ -675,6 +675,9 @@ impl Default for Permit {
     }
 }
 
+#[cfg(loom)] // necessary until loom adds send impls for its AtomicPtr
+unsafe impl Send for Permit {}
+
 // ===== impl AcquireError ====
 
 impl AcquireError {
