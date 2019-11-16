@@ -170,6 +170,32 @@ fn complete_block_on_under_load() {
     });
 }
 
+#[test]
+fn repro_1768() {
+    use loom::sync::Arc;
+    use crate::sync::Mutex;
+    use crate::sync::oneshot;
+
+    loom::model(|| {
+        let rt = mk_pool(1);
+
+        let m = Arc::new(Mutex::new(()));
+        let (tx, rx) = oneshot::channel();
+
+        rt.block_on(async move {
+            crate::spawn(async move {
+                for _ in 0..5 {
+                    let _ = m.lock().await;
+                }
+
+                tx.send(()).unwrap();
+            });
+
+            rx.await.unwrap();
+        });
+    });
+}
+
 fn mk_pool(num_threads: usize) -> Runtime {
     use crate::blocking::BlockingPool;
 

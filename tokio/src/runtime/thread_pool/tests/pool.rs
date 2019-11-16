@@ -14,6 +14,57 @@ use std::task::{Context, Poll, Waker};
 use std::time::Duration;
 
 #[test]
+fn repro() {
+    use crate::sync::Mutex;
+    use crate::sync::oneshot::channel;
+    use std::sync::Arc;
+
+    async fn do_iteration() {
+        // Changing this to a higher value will prevent it from getting stuck
+        const NR_ITERATIONS: usize = 5;
+        let m = Arc::new(Mutex::new(()));//IntrusiveMutex::new((), true));
+        let (sender, receiver) = channel();
+
+        let m = m.clone();
+        crate::spawn(async move {
+            for _ in 0..NR_ITERATIONS {
+                let _ = m.lock().await;
+            }
+            sender.send(());
+        });
+
+        receiver.await;
+    }
+
+    const NR_ITERATIONS: usize = 10000;
+    const BLOCK_ON_PER_RT: usize = 3000;
+
+    let blocking_pool = blocking::BlockingPool::new("test".into(), None);
+
+    for i in 0 .. NR_ITERATIONS {
+        {
+            println!("Starting runtime {}", i);
+
+            let pool = ThreadPool::new(
+                1,
+                blocking_pool.spawner().clone(),
+                Arc::new(Box::new(|_, next| next())),
+                move |_| crate::runtime::park::ParkThread::new()
+            );
+
+            for _ in 0 .. BLOCK_ON_PER_RT {
+                pool.block_on(async {
+                    do_iteration().await;
+                });
+            }
+
+            println!("Stopping runtime");
+        }
+        println!("Stopped runtime");
+    }
+}
+
+#[test]
 fn eagerly_drops_futures() {
     use std::sync::{mpsc, Mutex};
 
